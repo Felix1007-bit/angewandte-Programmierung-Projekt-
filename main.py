@@ -10,6 +10,11 @@ def root():
 def get_name(name: str):
     return {"message": f"Hello {name}"}
 
-@app.get("/lastname/{lastname}")
-def get_lastname(lastname: str):
-    return {"message": f"Hello {lastname}"}
+
+@app.get("/fullname/{name}/{lastname}")
+def get_fullname(name: str, lastname: str):
+    return {"message": f"Hello {name} {lastname}"}
+
+@app.get("/age/{age}")
+def get_age(age: int):
+    return {"message": f"You are {age} years old"}
