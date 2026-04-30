@@ -209,7 +209,7 @@ def delete_note(note_id: int):
 # Day3
 #######
 
-app.get ("/queryparameters")
+@app.get("/queryparameters")
 def query_parameters(param1: str = None, param2: int = None) -> dict:
     """Example endpoint to demonstrate query parameters
     
