@@ -204,3 +204,14 @@ def delete_note(note_id: int):
             return {"message": "Note deleted"}
 
     raise HTTPException(404, "Note not found")
+
+#######
+# Day3
+#######
+
+app.get ("/queryparameters")
+def query_parameters(param1: str = None, param2: int = None):
+    return {
+        "param1": param1,
+        "param2": param2
+    }
