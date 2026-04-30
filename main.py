@@ -213,13 +213,13 @@ def delete_note(note_id: int):
 def query_parameters(param1: str = None, param2: int = None) -> dict:
     namen = ["Alice", "Bob", "Charlie"]
 
+    if not param1:
+        return {"namen": namen}
+
     name_gefiltert = []
     for name in namen:
         if param1 in name:
             name_gefiltert.append(name)
-
-    if not param1:
-        return {"namen": namen}
 
     return {
         "param1": param1,
