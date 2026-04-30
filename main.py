@@ -211,14 +211,15 @@ def delete_note(note_id: int):
 
 @app.get("/queryparameters")
 def query_parameters(param1: str = None, param2: int = None) -> dict:
-    """Example endpoint to demonstrate query parameters
-    
-    - **param1**: A string query parameter (optional)
-    - **param2**: An integer query parameter (optional)
-    
-    Returns a JSON object with the provided parameters
-    """
+    namen = ["Alice", "Bob", "Charlie"]
+
+    name_gefiltert = []
+    for name in namen:
+        if param1 in name:
+            name_gefiltert.append(name)
+
     return {
         "param1": param1,
-        "param2": param2
+        "param2": param2,
+        "namen": name_gefiltert
     }
