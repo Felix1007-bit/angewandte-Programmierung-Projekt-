@@ -218,6 +218,9 @@ def query_parameters(param1: str = None, param2: int = None) -> dict:
         if param1 in name:
             name_gefiltert.append(name)
 
+    if not param1:
+        return {"namen": namen}
+
     return {
         "param1": param1,
         "param2": param2,
