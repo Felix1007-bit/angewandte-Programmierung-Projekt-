@@ -2,8 +2,7 @@ import pytest
 import requests
 from faker import Faker
 
-fake = Faker()
-print(fake.name())
+name_fake = Faker() 
 
 BASE_URL = "http://localhost:8000/"
 
@@ -23,7 +22,7 @@ def test_check_404_Error():
 def test_check_greetings():
     """Test the personalized greeting endpoint with a sample name."""
     for _ in range(10):
-        name = name_fake.first_name()
+        name = fake.first_name()
         response = requests.get(f"{BASE_URL}/greetings/{name}")
         assert response.status_code == 200
         data = response.json()
