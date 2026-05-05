@@ -383,3 +383,112 @@ def query_parameters(param1: str = None, param2: int = None) -> dict:
         "param2": param2,
         "namen": name_gefiltert
     }
+
+# ─────────────────────────────────────────
+# Day 4 – Course Catalog API – Datenmodelle
+# ─────────────────────────────────────────
+
+class CourseCreate(BaseModel):
+    """Model for creating courses (no ID)"""
+    code: str
+    name: str
+    semester: int
+    ects: int
+    lecturer: str
+
+
+class Course(BaseModel):
+    """Model for courses (with ID)"""
+    id: int
+    code: str
+    name: str
+    semester: int
+    ects: int
+    lecturer: str
+
+# ─────────────────────────────────────────
+# Day 4 – Course Datei-Persistenz
+# ─────────────────────────────────────────
+
+COURSES_FILE = Path("courses.json")
+
+
+def load_courses():
+    """Load courses from JSON file and return courses list and next ID counter"""
+    courses_db = []
+    course_id_counter = 1
+
+    if COURSES_FILE.exists():
+        with open(COURSES_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            courses_db = [Course(**course) for course in data]
+
+            if courses_db:
+                course_id_counter = max(c.id for c in courses_db) + 1
+
+    return courses_db, course_id_counter
+
+
+def save_courses(courses_db):
+    """Save courses to JSON file after each change"""
+    with open(COURSES_FILE, 'w', encoding='utf-8') as f:
+        courses_data = [course.model_dump() for course in courses_db]
+        json.dump(courses_data, f, indent=2, ensure_ascii=False)
+
+# ─────────────────────────────────────────
+# Day 4 – Course Endpoints
+# ─────────────────────────────────────────
+
+@app.post("/courses", status_code=201)
+def create_course(course: CourseCreate) -> Course:
+    """Create a new course. Returns 409 if course code already exists."""
+    courses_db, course_id_counter = load_courses()
+
+    # Duplikat-Prüfung (case-insensitive)
+    for existing in courses_db:
+        if existing.code.upper() == course.code.upper():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Course with code '{course.code}' already exists"
+            )
+
+    new_course = Course(
+        id=course_id_counter,
+        **course.model_dump()
+    )
+
+    courses_db.append(new_course)
+    save_courses(courses_db)
+
+    return new_course
+
+
+@app.get("/courses")
+def list_courses(semester: int = None, min_ects: int = 0) -> list[Course]:
+    """List all courses with optional filters"""
+    courses_db, _ = load_courses()
+
+    filtered = courses_db
+
+    if semester is not None:
+        filtered = [c for c in filtered if c.semester == semester]
+
+    if min_ects > 0:
+        filtered = [c for c in filtered if c.ects >= min_ects]
+
+    return filtered
+
+
+@app.get("/courses/{course_id}")
+def get_course(course_id: int) -> Course:
+    """Get a specific course by ID"""
+    courses_db, _ = load_courses()
+
+    for course in courses_db:
+        if course.id == course_id:
+            return course
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Course with ID {course_id} not found"
+    )
