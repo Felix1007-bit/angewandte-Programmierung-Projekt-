@@ -133,5 +133,132 @@
       "pytest"
     ],
     "created_at": "2026-05-05T07:43:34.181365+00:00"
+  },
+  {
+    "id": 14,
+    "title": "Test Note",
+    "content": "Test Inhalt",
+    "category": "Testing",
+    "tags": [
+      "test",
+      "pytest"
+    ],
+    "created_at": "2026-05-05T09:16:41.591937+00:00"
+  },
+  {
+    "id": 15,
+    "title": "Note fuer ID-Test",
+    "content": "Test Inhalt",
+    "category": "Testing",
+    "tags": [
+      "test",
+      "pytest"
+    ],
+    "created_at": "2026-05-05T09:16:41.597883+00:00"
+  },
+  {
+    "id": 16,
+    "title": "Aktualisierter Titel",
+    "content": "Neuer Inhalt",
+    "category": "Updated",
+    "tags": [
+      "updated"
+    ],
+    "created_at": "2026-05-05T09:16:41.600868+00:00"
+  },
+  {
+    "id": 17,
+    "title": "Work Note",
+    "content": "Test Inhalt",
+    "category": "Work_Filter_Test",
+    "tags": [
+      "test",
+      "pytest"
+    ],
+    "created_at": "2026-05-05T09:16:41.608960+00:00"
+  },
+  {
+    "id": 18,
+    "title": "Suchbegriff_XYZ789 im Titel",
+    "content": "Normaler Inhalt",
+    "category": "Testing",
+    "tags": [
+      "test",
+      "pytest"
+    ],
+    "created_at": "2026-05-05T09:16:41.611575+00:00"
+  },
+  {
+    "id": 19,
+    "title": "Tagged Note",
+    "content": "Test Inhalt",
+    "category": "Testing",
+    "tags": [
+      "uniquetag_abc123"
+    ],
+    "created_at": "2026-05-05T09:16:41.614652+00:00"
+  },
+  {
+    "id": 20,
+    "title": "Kombination Meeting Note",
+    "content": "Inhalt",
+    "category": "CombinedTest",
+    "tags": [
+      "kombi_tag"
+    ],
+    "created_at": "2026-05-05T09:16:41.617347+00:00"
+  },
+  {
+    "id": 21,
+    "title": "Test Note",
+    "content": "Test Inhalt",
+    "category": "Testing",
+    "tags": [
+      "test",
+      "pytest"
+    ],
+    "created_at": "2026-05-05T09:16:41.626521+00:00"
+  },
+  {
+    "id": 22,
+    "title": "Nur Titel geaendert",
+    "content": "Unveraenderter Inhalt",
+    "category": "Testing",
+    "tags": [
+      "test",
+      "pytest"
+    ],
+    "created_at": "2026-05-05T09:16:41.629666+00:00"
+  },
+  {
+    "id": 23,
+    "title": "Test Note",
+    "content": "Test Inhalt",
+    "category": "Testing",
+    "tags": [
+      "bonus_tag_xyz"
+    ],
+    "created_at": "2026-05-05T09:16:41.633634+00:00"
+  },
+  {
+    "id": 24,
+    "title": "Tag Resource Test",
+    "content": "Test Inhalt",
+    "category": "Testing",
+    "tags": [
+      "resource_tag_abc"
+    ],
+    "created_at": "2026-05-05T09:16:41.636836+00:00"
+  },
+  {
+    "id": 25,
+    "title": "Test Note",
+    "content": "Test Inhalt",
+    "category": "KategorieXYZ",
+    "tags": [
+      "test",
+      "pytest"
+    ],
+    "created_at": "2026-05-05T09:16:41.640044+00:00"
   }
 ]
