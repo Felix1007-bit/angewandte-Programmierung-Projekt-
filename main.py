@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Self
 from collections import Counter
 import json
 from pathlib import Path
@@ -71,26 +71,140 @@ def calculate_double(number: int):
 # Day 2/3 – Note Taking API – Datenmodelle
 # ─────────────────────────────────────────
 
+# Erlaubte Kategorien (Day 5)
+ALLOWED_CATEGORIES = {"work", "personal", "school", "ideas", "general"}
+
+
 class NoteCreate(BaseModel):
-    title: str
-    content: str
-    category: str
-    tags: list[str] = []  # Day 3: Tags-Feld hinzugefügt
+    # Day 5: ConfigDict – automatisch trimmen + keine Extra-Felder
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="forbid"
+    )
+
+    title: str = Field(
+        min_length=3,
+        max_length=100,
+        description="Kurzer Notiztitel (3–100 Zeichen)",
+        examples=["Einkaufsliste", "Meeting-Vorbereitung"]
+    )
+    content: str = Field(
+        min_length=1,
+        max_length=10_000,
+        description="Inhalt der Notiz (1–10.000 Zeichen)"
+    )
+    category: str = Field(
+        min_length=2,
+        max_length=30,
+        description=f"Kategorie – erlaubt: {sorted(ALLOWED_CATEGORIES)}",
+        examples=["work"]
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Bis zu 10 Tags (werden kleingeschrieben & dedupliziert)"
+    )
+
+    # Day 5 Task 1: Titel darf nicht nur Leerzeichen sein
+    @field_validator("title")
+    @classmethod
+    def title_not_only_whitespace(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Titel darf nicht nur aus Leerzeichen bestehen")
+        return value
+
+    # Day 5 Task 2: Kategorie normalisieren + auf Whitelist prüfen
+    @field_validator("category")
+    @classmethod
+    def category_must_be_valid(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in ALLOWED_CATEGORIES:
+            raise ValueError(
+                f"category muss eines von {sorted(ALLOWED_CATEGORIES)} sein"
+            )
+        return normalized
+
+    # Day 5 Task 2: Tags bereinigen – strip, lowercase, Duplikate entfernen
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, raw: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for tag in raw:
+            t = tag.strip().lower()
+            if not t:
+                raise ValueError("Tags dürfen keine leeren Zeichenketten sein")
+            if len(t) < 2:
+                raise ValueError(f"Tag '{t}' muss mindestens 2 Zeichen haben")
+            if t in seen:
+                continue  # Duplikat – still entfernen
+            seen.add(t)
+            cleaned.append(t)
+        return cleaned
+
+    # Day 5 Task 3: Cross-Field-Regel – work-Notizen brauchen Tag "work"
+    @model_validator(mode="after")
+    def work_notes_need_work_tag(self) -> Self:
+        # Warum model_validator: Diese Regel verbindet zwei Felder (category + tags),
+        # deshalb kann kein field_validator allein entscheiden.
+        if self.category == "work" and "work" not in self.tags:
+            raise ValueError(
+                "work-Notizen müssen den Tag 'work' in der Tag-Liste enthalten"
+            )
+        return self
+
 
 class Note(BaseModel):
     id: int
     title: str
     content: str
     category: str
-    tags: list[str] = []  # Day 3: Tags-Feld hinzugefügt
+    tags: list[str] = []
     created_at: str
 
-# Day 3 Hausaufgabe Task 4: Modell für PATCH (nur optionale Felder)
+
+# Day 3 Hausaufgabe Task 4 + Day 5 Task 4: PATCH – optionale Felder mit Constraints
 class NoteUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    category: Optional[str] = None
-    tags: Optional[list[str]] = None
+    model_config = ConfigDict(
+        str_strip_whitespace=True
+    )
+
+    title: Optional[str] = Field(default=None, min_length=3, max_length=100)
+    content: Optional[str] = Field(default=None, min_length=1, max_length=10_000)
+    category: Optional[str] = Field(default=None, min_length=2, max_length=30)
+    tags: Optional[list[str]] = Field(default=None, max_length=10)
+
+    @field_validator("category")
+    @classmethod
+    def category_must_be_valid(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        normalized = value.strip().lower()
+        if normalized not in ALLOWED_CATEGORIES:
+            raise ValueError(
+                f"category muss eines von {sorted(ALLOWED_CATEGORIES)} sein"
+            )
+        return normalized
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, raw: Optional[list[str]]) -> Optional[list[str]]:
+        if raw is None:
+            return raw
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for tag in raw:
+            t = tag.strip().lower()
+            if not t:
+                raise ValueError("Tags dürfen keine leeren Zeichenketten sein")
+            if len(t) < 2:
+                raise ValueError(f"Tag '{t}' muss mindestens 2 Zeichen haben")
+            if t in seen:
+                continue
+            seen.add(t)
+            cleaned.append(t)
+        return cleaned
+
 
 # ─────────────────────────────────────────
 # Day 2 – Datei-Persistenz
@@ -152,8 +266,8 @@ def list_notes(
     category: str = None,
     search: str = None,
     tag: str = None,
-    created_after: str = None,   # Day 3 Hausaufgabe Task 5
-    created_before: str = None   # Day 3 Hausaufgabe Task 5
+    created_after: str = None,
+    created_before: str = None
 ) -> list[Note]:
     """
     List notes with optional filters:
@@ -167,29 +281,18 @@ def list_notes(
 
     filtered = []
     for note in notes_db:
-        # Filter by category
         if category and note.category != category:
             continue
-
-        # Filter by search term (Titel und Inhalt)
         if search:
             search_lower = search.lower()
-            title_match = search_lower in note.title.lower()
-            content_match = search_lower in note.content.lower()
-            if not (title_match or content_match):
+            if not (search_lower in note.title.lower() or search_lower in note.content.lower()):
                 continue
-
-        # Filter by tag
         if tag and tag not in note.tags:
             continue
-
-        # Day 3 Hausaufgabe Task 5: Datum-Filter
         if created_after and note.created_at < created_after:
             continue
-
         if created_before and note.created_at > created_before:
             continue
-
         filtered.append(note)
 
     return filtered
@@ -198,20 +301,13 @@ def list_notes(
 # WICHTIG: /notes/stats muss VOR /notes/{note_id} definiert sein!
 @app.get("/notes/stats")
 def get_notes_stats():
-    """
-    Get statistics about notes.
-    Day 3 Hausaufgabe Task 2: Erweitert mit top_tags und unique_tags_count
-    """
+    """Get statistics about notes."""
     notes_db, _ = load_notes()
 
     categories = {}
     for note in notes_db:
-        if note.category in categories:
-            categories[note.category] += 1
-        else:
-            categories[note.category] = 1
+        categories[note.category] = categories.get(note.category, 0) + 1
 
-    # Alle Tags zählen mit Counter (Day 3 Hausaufgabe Task 2)
     all_tags = []
     for note in notes_db:
         all_tags.extend(note.tags)
@@ -245,7 +341,6 @@ def get_note(note_id: int) -> Note:
     )
 
 
-# Day 3: PUT Endpoint zum Aktualisieren einer Note
 @app.put("/notes/{note_id}")
 def update_note(note_id: int, note_update: NoteCreate) -> Note:
     """Update an existing note (replaces all fields)"""
@@ -259,7 +354,7 @@ def update_note(note_id: int, note_update: NoteCreate) -> Note:
                 content=note_update.content,
                 category=note_update.category,
                 tags=note_update.tags,
-                created_at=note.created_at  # Erstellungsdatum bleibt erhalten
+                created_at=note.created_at
             )
             notes_db[i] = updated_note
             save_notes(notes_db)
@@ -274,15 +369,11 @@ def update_note(note_id: int, note_update: NoteCreate) -> Note:
 # Day 3 Hausaufgabe Task 4: PATCH Endpoint für partielle Updates
 @app.patch("/notes/{note_id}")
 def partial_update_note(note_id: int, note_update: NoteUpdate) -> Note:
-    """
-    Partially update a note (only provided fields are updated).
-    Unlike PUT, PATCH only updates fields you provide.
-    """
+    """Partially update a note (only provided fields are updated)."""
     notes_db, _ = load_notes()
 
     for i, note in enumerate(notes_db):
         if note.id == note_id:
-            # Nur die übergebenen Felder aktualisieren
             if note_update.title is not None:
                 note.title = note_update.title
             if note_update.content is not None:
@@ -299,7 +390,6 @@ def partial_update_note(note_id: int, note_update: NoteUpdate) -> Note:
     raise HTTPException(status_code=404, detail="Note not found")
 
 
-# Day 3: DELETE mit Status 204 (No Content)
 @app.delete("/notes/{note_id}", status_code=204)
 def delete_note(note_id: int):
     """Delete a note by ID. Returns 204 No Content on success."""
@@ -309,7 +399,7 @@ def delete_note(note_id: int):
         if note.id == note_id:
             notes_db.pop(i)
             save_notes(notes_db)
-            return  # 204 = kein Response-Body
+            return
 
     raise HTTPException(404, "Note not found")
 
@@ -322,12 +412,9 @@ def delete_note(note_id: int):
 def list_tags() -> list[str]:
     """Get all unique tags from all notes"""
     notes_db, _ = load_notes()
-
     all_tags = set()
     for note in notes_db:
-        for tag in note.tags:
-            all_tags.add(tag)
-
+        all_tags.update(note.tags)
     return sorted(list(all_tags))
 
 
@@ -335,9 +422,7 @@ def list_tags() -> list[str]:
 def get_notes_by_tag(tag_name: str) -> list[Note]:
     """Get all notes with a specific tag"""
     notes_db, _ = load_notes()
-
-    filtered = [note for note in notes_db if tag_name in note.tags]
-    return filtered
+    return [note for note in notes_db if tag_name in note.tags]
 
 
 # ─────────────────────────────────────────
@@ -348,18 +433,14 @@ def get_notes_by_tag(tag_name: str) -> list[Note]:
 def list_categories() -> list[str]:
     """Get all unique categories from all notes"""
     notes_db, _ = load_notes()
-
-    categories = set(note.category for note in notes_db)
-    return sorted(list(categories))
+    return sorted(list(set(note.category for note in notes_db)))
 
 
 @app.get("/categories/{category_name}/notes")
 def get_notes_by_category(category_name: str) -> list[Note]:
     """Get all notes in a specific category"""
     notes_db, _ = load_notes()
-
-    filtered = [note for note in notes_db if note.category == category_name]
-    return filtered
+    return [note for note in notes_db if note.category == category_name]
 
 
 # ─────────────────────────────────────────
@@ -373,10 +454,7 @@ def query_parameters(param1: str = None, param2: int = None) -> dict:
     if not param1:
         return {"namen": namen}
 
-    name_gefiltert = []
-    for name in namen:
-        if param1 in name:
-            name_gefiltert.append(name)
+    name_gefiltert = [name for name in namen if param1 in name]
 
     return {
         "param1": param1,
@@ -444,7 +522,6 @@ def create_course(course: CourseCreate) -> Course:
     """Create a new course. Returns 409 if course code already exists."""
     courses_db, course_id_counter = load_courses()
 
-    # Duplikat-Prüfung (case-insensitive)
     for existing in courses_db:
         if existing.code.upper() == course.code.upper():
             raise HTTPException(
