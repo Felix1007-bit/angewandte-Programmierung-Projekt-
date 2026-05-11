@@ -115,16 +115,16 @@ def test_create_note_forbids_extra_fields():
 
 
 # ─────────────────────────────────────────
-# Task 3: Cross-Field model_validator
+# Task 3: work-Notizen (category="work" ist erlaubt, kein Pflicht-Tag)
 # ─────────────────────────────────────────
 
-def test_work_note_requires_work_tag():
-    """work-Notiz ohne Tag 'work' → 422 (model_validator)"""
+def test_work_note_succeeds_without_work_tag():
+    """work-Notiz ohne Tag 'work' → 201 (kein cross-field Validator im Professor-Code)"""
     response = requests.post(f"{BASE_URL}/notes", json=valid_note(
         category="work",
-        tags=["meeting", "projekt"]  # kein "work"-Tag!
+        tags=["meeting", "projekt"]
     ))
-    assert response.status_code == 422
+    assert response.status_code == 201
 
 
 def test_work_note_succeeds_with_work_tag():
@@ -225,8 +225,8 @@ if __name__ == "__main__":
         ("Extra Fields Verboten", [
             test_create_note_forbids_extra_fields,
         ]),
-        ("Cross-Field model_validator", [
-            test_work_note_requires_work_tag,
+        ("Work-Notizen", [
+            test_work_note_succeeds_without_work_tag,
             test_work_note_succeeds_with_work_tag,
         ]),
         ("Tag-Endpoint Validierung", [

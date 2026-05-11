@@ -173,12 +173,6 @@ class NoteCreate(BaseModel):
             cleaned.append(t)
         return cleaned
 
-    @model_validator(mode="after")
-    def work_notes_need_work_tag(self) -> Self:
-        # model_validator nötig, weil zwei Felder (category + tags) kombiniert werden
-        if self.category == "work" and "work" not in self.tags:
-            raise ValueError("work-Notizen müssen den Tag 'work' enthalten")
-        return self
 
 
 class NoteUpdate(BaseModel):
@@ -266,8 +260,8 @@ def list_notes(
     category: Optional[str] = None,
     search: Optional[str] = None,
     tag: Optional[str] = None,
-    created_after: Optional[str] = None,
-    created_before: Optional[str] = None
+    created_after: Optional[datetime] = None,
+    created_before: Optional[datetime] = None
 ) -> list[NoteResponse]:
     """Notizen auflisten mit optionalen Filtern."""
     notes = session.exec(select(NoteDB)).all()
@@ -280,12 +274,22 @@ def list_notes(
             s = search.lower()
             if s not in note.title.lower() and s not in note.content.lower():
                 continue
-        if tag and tag not in json.loads(note.tags_json):
+        if tag and tag.lower() not in json.loads(note.tags_json):
             continue
-        if created_after and note.created_at < created_after:
-            continue
-        if created_before and note.created_at > created_before:
-            continue
+        if created_after:
+            note_dt = datetime.fromisoformat(note.created_at)
+            if note_dt.tzinfo is None:
+                note_dt = note_dt.replace(tzinfo=timezone.utc)
+            ca = created_after if created_after.tzinfo else created_after.replace(tzinfo=timezone.utc)
+            if note_dt < ca:
+                continue
+        if created_before:
+            note_dt = datetime.fromisoformat(note.created_at)
+            if note_dt.tzinfo is None:
+                note_dt = note_dt.replace(tzinfo=timezone.utc)
+            cb = created_before if created_before.tzinfo else created_before.replace(tzinfo=timezone.utc)
+            if note_dt > cb:
+                continue
         filtered.append(note)
 
     return [db_to_note(n) for n in filtered]
@@ -387,7 +391,7 @@ def list_tags(session: SessionDep) -> list[str]:
 def get_notes_by_tag(tag_name: str, session: SessionDep) -> list[NoteResponse]:
     """Alle Notizen mit einem bestimmten Tag."""
     notes = session.exec(select(NoteDB)).all()
-    return [db_to_note(n) for n in notes if tag_name in json.loads(n.tags_json)]
+    return [db_to_note(n) for n in notes if tag_name.lower() in json.loads(n.tags_json)]
 
 
 # ─────────────────────────────────────────
