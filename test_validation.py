@@ -137,6 +137,34 @@ def test_work_note_succeeds_with_work_tag():
 
 
 # ─────────────────────────────────────────
+# Task 5/6: Tag-Endpoint Validierung
+# ─────────────────────────────────────────
+
+def test_tag_name_rejects_uppercase():
+    """POST /tags mit Großbuchstaben → 422 (pattern ^[a-z0-9-]+$)"""
+    response = requests.post(f"{BASE_URL}/tags", json={"name": "UPPERCASE"})
+    assert response.status_code == 422, f"Erwartet 422, bekam {response.status_code}"
+
+
+def test_tag_name_accepts_valid():
+    """POST /tags mit gültigem Namen → 201 (oder 409 wenn Tag bereits existiert)"""
+    response = requests.post(f"{BASE_URL}/tags", json={"name": "valid-tag-01"})
+    assert response.status_code in (201, 409), f"Erwartet 201 oder 409, bekam {response.status_code}"
+
+
+def test_tag_name_rejects_spaces():
+    """POST /tags mit Leerzeichen → 422"""
+    response = requests.post(f"{BASE_URL}/tags", json={"name": "no spaces"})
+    assert response.status_code == 422
+
+
+def test_tag_name_rejects_too_short():
+    """POST /tags mit weniger als 2 Zeichen → 422"""
+    response = requests.post(f"{BASE_URL}/tags", json={"name": "x"})
+    assert response.status_code == 422
+
+
+# ─────────────────────────────────────────
 # Task 4: NoteUpdate (PATCH) – Constraints bleiben erhalten
 # ─────────────────────────────────────────
 
@@ -200,6 +228,12 @@ if __name__ == "__main__":
         ("Cross-Field model_validator", [
             test_work_note_requires_work_tag,
             test_work_note_succeeds_with_work_tag,
+        ]),
+        ("Tag-Endpoint Validierung", [
+            test_tag_name_rejects_uppercase,
+            test_tag_name_accepts_valid,
+            test_tag_name_rejects_spaces,
+            test_tag_name_rejects_too_short,
         ]),
         ("PATCH Validation", [
             test_patch_with_empty_body_succeeds,

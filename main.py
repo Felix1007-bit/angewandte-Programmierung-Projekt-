@@ -1,15 +1,51 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel, field_validator, model_validator, ConfigDict, Field as PydanticField
+from sqlmodel import SQLModel, Field as SQLField, Session, create_engine, select, col
 from datetime import datetime, timezone
-from typing import Optional, Self
+from typing import Optional, Self, Annotated, TypeAlias
 from collections import Counter
 import json
-from pathlib import Path
+
+# ─────────────────────────────────────────
+# Datenbank-Setup (Day 6 – SQLModel + SQLite)
+# ─────────────────────────────────────────
+
+DATABASE_URL = "sqlite:///./notes.db"
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args={"check_same_thread": False}
+)
+
+
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
+
+
+def get_session():
+    with Session(engine) as session:
+        yield session
+
+
+SessionDep: TypeAlias = Annotated[Session, Depends(get_session)]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_db_and_tables()
+    yield
+
+
+# ─────────────────────────────────────────
+# App
+# ─────────────────────────────────────────
 
 app = FastAPI(
     title="Angewandte Programmierung",
-    description="Simple note management API",
-    version="1.0.0"
+    description="Notes, Tags & Courses API",
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 # ─────────────────────────────────────────
@@ -20,21 +56,16 @@ app = FastAPI(
 def read_root():
     return {"message": "Hello World!"}
 
+
 @app.get("/status")
 def get_status():
-    return {
-        "status": "online",
-        "version": "0.1.0",
-        "day": 1
-    }
+    return {"status": "online", "version": "0.1.0", "day": 1}
+
 
 @app.get("/about")
 def get_about():
-    return {
-        "project": "My First API",
-        "author": "Felix",
-        "course": "Applied Programming"
-    }
+    return {"project": "My First API", "author": "Felix", "course": "Applied Programming"}
+
 
 # ─────────────────────────────────────────
 # Day 1 – Hausaufgaben-Endpoints
@@ -43,11 +74,8 @@ def get_about():
 @app.get("/square/{number}")
 def calculate_square(number: int):
     result = number * number
-    return {
-        "number": number,
-        "square": result,
-        "calculation": f"{number} × {number} = {result}"
-    }
+    return {"number": number, "square": result, "calculation": f"{number} × {number} = {result}"}
+
 
 @app.get("/student")
 def get_student():
@@ -58,78 +86,81 @@ def get_student():
         "university": "Deine Universität"
     }
 
+
 @app.get("/double/{number}")
 def calculate_double(number: int):
     result = number * 2
-    return {
-        "number": number,
-        "double": result,
-        "calculation": f"{number} × 2 = {result}"
-    }
+    return {"number": number, "double": result, "calculation": f"{number} × 2 = {result}"}
+
 
 # ─────────────────────────────────────────
-# Day 2/3 – Note Taking API – Datenmodelle
+# Day 2/3/5 – Note Datenbank-Modell (SQLModel)
 # ─────────────────────────────────────────
 
-# Erlaubte Kategorien (Day 5)
+class NoteDB(SQLModel, table=True):
+    """SQLite-Tabelle für Notizen. Tags werden als JSON-String gespeichert."""
+    __tablename__ = "note"
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    title: str
+    content: str
+    category: str
+    tags_json: str = SQLField(default="[]")   # z.B. '["work", "meeting"]'
+    created_at: str
+
+
+# ─────────────────────────────────────────
+# Day 2/3/5 – Note Eingabe-Modelle (Pydantic)
+# ─────────────────────────────────────────
+
 ALLOWED_CATEGORIES = {"work", "personal", "school", "ideas", "general"}
 
 
 class NoteCreate(BaseModel):
-    # Day 5: ConfigDict – automatisch trimmen + keine Extra-Felder
+    """Eingabe-Modell mit vollständiger Day-5-Validierung."""
     model_config = ConfigDict(
         str_strip_whitespace=True,
         extra="forbid"
     )
 
-    title: str = Field(
-        min_length=3,
-        max_length=100,
+    title: str = PydanticField(
+        min_length=3, max_length=100,
         description="Kurzer Notiztitel (3–100 Zeichen)",
-        examples=["Einkaufsliste", "Meeting-Vorbereitung"]
+        examples=["Einkaufsliste"]
     )
-    content: str = Field(
-        min_length=1,
-        max_length=10_000,
-        description="Inhalt der Notiz (1–10.000 Zeichen)"
+    content: str = PydanticField(
+        min_length=1, max_length=10_000,
+        description="Inhalt der Notiz"
     )
-    category: str = Field(
-        min_length=2,
-        max_length=30,
-        description=f"Kategorie – erlaubt: {sorted(ALLOWED_CATEGORIES)}",
+    category: str = PydanticField(
+        min_length=2, max_length=30,
+        description=f"Erlaubte Kategorien: {sorted(ALLOWED_CATEGORIES)}",
         examples=["work"]
     )
-    tags: list[str] = Field(
+    tags: list[str] = PydanticField(
         default_factory=list,
         max_length=10,
-        description="Bis zu 10 Tags (werden kleingeschrieben & dedupliziert)"
+        description="Bis zu 10 Tags"
     )
 
-    # Day 5 Task 1: Titel darf nicht nur Leerzeichen sein
     @field_validator("title")
     @classmethod
-    def title_not_only_whitespace(cls, value: str) -> str:
-        if not value.strip():
+    def title_not_only_whitespace(cls, v: str) -> str:
+        if not v.strip():
             raise ValueError("Titel darf nicht nur aus Leerzeichen bestehen")
-        return value
+        return v
 
-    # Day 5 Task 2: Kategorie normalisieren + auf Whitelist prüfen
     @field_validator("category")
     @classmethod
-    def category_must_be_valid(cls, value: str) -> str:
-        normalized = value.strip().lower()
+    def category_must_be_valid(cls, v: str) -> str:
+        normalized = v.strip().lower()
         if normalized not in ALLOWED_CATEGORIES:
-            raise ValueError(
-                f"category muss eines von {sorted(ALLOWED_CATEGORIES)} sein"
-            )
+            raise ValueError(f"category muss eines von {sorted(ALLOWED_CATEGORIES)} sein")
         return normalized
 
-    # Day 5 Task 2: Tags bereinigen – strip, lowercase, Duplikate entfernen
     @field_validator("tags")
     @classmethod
     def clean_tags(cls, raw: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        seen: set[str] = set()
+        cleaned, seen = [], set()
         for tag in raw:
             t = tag.strip().lower()
             if not t:
@@ -137,53 +168,36 @@ class NoteCreate(BaseModel):
             if len(t) < 2:
                 raise ValueError(f"Tag '{t}' muss mindestens 2 Zeichen haben")
             if t in seen:
-                continue  # Duplikat – still entfernen
+                continue
             seen.add(t)
             cleaned.append(t)
         return cleaned
 
-    # Day 5 Task 3: Cross-Field-Regel – work-Notizen brauchen Tag "work"
     @model_validator(mode="after")
     def work_notes_need_work_tag(self) -> Self:
-        # Warum model_validator: Diese Regel verbindet zwei Felder (category + tags),
-        # deshalb kann kein field_validator allein entscheiden.
+        # model_validator nötig, weil zwei Felder (category + tags) kombiniert werden
         if self.category == "work" and "work" not in self.tags:
-            raise ValueError(
-                "work-Notizen müssen den Tag 'work' in der Tag-Liste enthalten"
-            )
+            raise ValueError("work-Notizen müssen den Tag 'work' enthalten")
         return self
 
 
-class Note(BaseModel):
-    id: int
-    title: str
-    content: str
-    category: str
-    tags: list[str] = []
-    created_at: str
-
-
-# Day 3 Hausaufgabe Task 4 + Day 5 Task 4: PATCH – optionale Felder mit Constraints
 class NoteUpdate(BaseModel):
-    model_config = ConfigDict(
-        str_strip_whitespace=True
-    )
+    """PATCH-Modell: alle Felder optional, Constraints bleiben erhalten."""
+    model_config = ConfigDict(str_strip_whitespace=True)
 
-    title: Optional[str] = Field(default=None, min_length=3, max_length=100)
-    content: Optional[str] = Field(default=None, min_length=1, max_length=10_000)
-    category: Optional[str] = Field(default=None, min_length=2, max_length=30)
-    tags: Optional[list[str]] = Field(default=None, max_length=10)
+    title: Optional[str] = PydanticField(default=None, min_length=3, max_length=100)
+    content: Optional[str] = PydanticField(default=None, min_length=1, max_length=10_000)
+    category: Optional[str] = PydanticField(default=None, min_length=2, max_length=30)
+    tags: Optional[list[str]] = PydanticField(default=None, max_length=10)
 
     @field_validator("category")
     @classmethod
-    def category_must_be_valid(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return value
-        normalized = value.strip().lower()
+    def category_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        normalized = v.strip().lower()
         if normalized not in ALLOWED_CATEGORIES:
-            raise ValueError(
-                f"category muss eines von {sorted(ALLOWED_CATEGORIES)} sein"
-            )
+            raise ValueError(f"category muss eines von {sorted(ALLOWED_CATEGORIES)} sein")
         return normalized
 
     @field_validator("tags")
@@ -191,8 +205,7 @@ class NoteUpdate(BaseModel):
     def clean_tags(cls, raw: Optional[list[str]]) -> Optional[list[str]]:
         if raw is None:
             return raw
-        cleaned: list[str] = []
-        seen: set[str] = set()
+        cleaned, seen = [], set()
         for tag in raw:
             t = tag.strip().lower()
             if not t:
@@ -206,88 +219,68 @@ class NoteUpdate(BaseModel):
         return cleaned
 
 
-# ─────────────────────────────────────────
-# Day 2 – Datei-Persistenz
-# ─────────────────────────────────────────
-
-NOTES_FILE = Path("data/notes.json")
-
-def load_notes():
-    """Load notes from JSON file and return notes list and next ID counter"""
-    notes_db = []
-    note_id_counter = 1
-
-    if NOTES_FILE.exists():
-        with open(NOTES_FILE, 'r') as f:
-            data = json.load(f)
-            notes_db = [Note(**note) for note in data]
-
-            if notes_db:
-                note_id_counter = max(note.id for note in notes_db) + 1
-
-    return notes_db, note_id_counter
+class NoteResponse(BaseModel):
+    """API-Antwort-Modell für Notizen."""
+    id: int
+    title: str
+    content: str
+    category: str
+    tags: list[str]
+    created_at: str
 
 
-def save_notes(notes_db):
-    """Save notes to JSON file after each change"""
-    NOTES_FILE.parent.mkdir(parents=True, exist_ok=True)
+def db_to_note(note: NoteDB) -> NoteResponse:
+    return NoteResponse(
+        id=note.id,
+        title=note.title,
+        content=note.content,
+        category=note.category,
+        tags=json.loads(note.tags_json),
+        created_at=note.created_at
+    )
 
-    with open(NOTES_FILE, 'w') as f:
-        notes_data = [note.model_dump() for note in notes_db]
-        json.dump(notes_data, f, indent=2)
 
 # ─────────────────────────────────────────
 # Day 2/3 – Notes Endpoints
 # ─────────────────────────────────────────
 
 @app.post("/notes", status_code=201)
-def create_note(note: NoteCreate) -> Note:
-    """Create a new note"""
-    notes_db, note_id_counter = load_notes()
-
-    new_note = Note(
-        id=note_id_counter,
+def create_note(note: NoteCreate, session: SessionDep) -> NoteResponse:
+    """Neue Notiz erstellen."""
+    db_note = NoteDB(
         title=note.title,
         content=note.content,
         category=note.category,
-        tags=note.tags,
+        tags_json=json.dumps(note.tags),
         created_at=datetime.now(timezone.utc).isoformat()
     )
+    session.add(db_note)
+    session.commit()
+    session.refresh(db_note)
+    return db_to_note(db_note)
 
-    notes_db.append(new_note)
-    save_notes(notes_db)
 
-    return new_note
-
-
-# Day 3: GET /notes mit Query-Parametern für Filterung
 @app.get("/notes")
 def list_notes(
-    category: str = None,
-    search: str = None,
-    tag: str = None,
-    created_after: str = None,
-    created_before: str = None
-) -> list[Note]:
-    """
-    List notes with optional filters:
-    - category: Filter by category
-    - search: Search in title and content
-    - tag: Filter by tag
-    - created_after: Only notes created after this date (ISO format)
-    - created_before: Only notes created before this date (ISO format)
-    """
-    notes_db, _ = load_notes()
+    session: SessionDep,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    tag: Optional[str] = None,
+    created_after: Optional[str] = None,
+    created_before: Optional[str] = None
+) -> list[NoteResponse]:
+    """Notizen auflisten mit optionalen Filtern."""
+    notes = session.exec(select(NoteDB)).all()
 
     filtered = []
-    for note in notes_db:
+    for note in notes:
         if category and note.category != category:
             continue
         if search:
-            search_lower = search.lower()
-            if not (search_lower in note.title.lower() or search_lower in note.content.lower()):
+            s = search.lower()
+            if s not in note.title.lower() and s not in note.content.lower():
                 continue
-        if tag and tag not in note.tags:
+        if tag and tag not in json.loads(note.tags_json):
             continue
         if created_after and note.created_at < created_after:
             continue
@@ -295,31 +288,26 @@ def list_notes(
             continue
         filtered.append(note)
 
-    return filtered
+    return [db_to_note(n) for n in filtered]
 
 
-# WICHTIG: /notes/stats muss VOR /notes/{note_id} definiert sein!
+# WICHTIG: /notes/stats vor /notes/{note_id} definieren!
 @app.get("/notes/stats")
-def get_notes_stats():
-    """Get statistics about notes."""
-    notes_db, _ = load_notes()
+def get_notes_stats(session: SessionDep):
+    """Statistiken über alle Notizen."""
+    notes = session.exec(select(NoteDB)).all()
 
-    categories = {}
-    for note in notes_db:
+    categories: dict = {}
+    all_tags: list = []
+    for note in notes:
         categories[note.category] = categories.get(note.category, 0) + 1
-
-    all_tags = []
-    for note in notes_db:
-        all_tags.extend(note.tags)
+        all_tags.extend(json.loads(note.tags_json))
 
     tag_counter = Counter(all_tags)
-    top_tags = [
-        {"tag": tag, "count": count}
-        for tag, count in tag_counter.most_common(5)
-    ]
+    top_tags = [{"tag": t, "count": c} for t, c in tag_counter.most_common(5)]
 
     return {
-        "total_notes": len(notes_db),
+        "total_notes": len(notes),
         "by_category": categories,
         "top_tags": top_tags,
         "unique_tags_count": len(tag_counter)
@@ -327,120 +315,99 @@ def get_notes_stats():
 
 
 @app.get("/notes/{note_id}")
-def get_note(note_id: int) -> Note:
-    """Get a specific note by ID"""
-    notes_db, _ = load_notes()
-
-    for note in notes_db:
-        if note.id == note_id:
-            return note
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Note with ID {note_id} not found"
-    )
+def get_note(note_id: int, session: SessionDep) -> NoteResponse:
+    """Einzelne Notiz per ID abrufen."""
+    note = session.get(NoteDB, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail=f"Note with ID {note_id} not found")
+    return db_to_note(note)
 
 
 @app.put("/notes/{note_id}")
-def update_note(note_id: int, note_update: NoteCreate) -> Note:
-    """Update an existing note (replaces all fields)"""
-    notes_db, _ = load_notes()
-
-    for i, note in enumerate(notes_db):
-        if note.id == note_id:
-            updated_note = Note(
-                id=note.id,
-                title=note_update.title,
-                content=note_update.content,
-                category=note_update.category,
-                tags=note_update.tags,
-                created_at=note.created_at
-            )
-            notes_db[i] = updated_note
-            save_notes(notes_db)
-            return updated_note
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Note with ID {note_id} not found"
-    )
+def update_note(note_id: int, note_update: NoteCreate, session: SessionDep) -> NoteResponse:
+    """Notiz vollständig aktualisieren (alle Felder ersetzen)."""
+    note = session.get(NoteDB, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail=f"Note with ID {note_id} not found")
+    note.title = note_update.title
+    note.content = note_update.content
+    note.category = note_update.category
+    note.tags_json = json.dumps(note_update.tags)
+    session.add(note)
+    session.commit()
+    session.refresh(note)
+    return db_to_note(note)
 
 
-# Day 3 Hausaufgabe Task 4: PATCH Endpoint für partielle Updates
 @app.patch("/notes/{note_id}")
-def partial_update_note(note_id: int, note_update: NoteUpdate) -> Note:
-    """Partially update a note (only provided fields are updated)."""
-    notes_db, _ = load_notes()
-
-    for i, note in enumerate(notes_db):
-        if note.id == note_id:
-            if note_update.title is not None:
-                note.title = note_update.title
-            if note_update.content is not None:
-                note.content = note_update.content
-            if note_update.category is not None:
-                note.category = note_update.category
-            if note_update.tags is not None:
-                note.tags = note_update.tags
-
-            notes_db[i] = note
-            save_notes(notes_db)
-            return note
-
-    raise HTTPException(status_code=404, detail="Note not found")
+def partial_update_note(note_id: int, note_update: NoteUpdate, session: SessionDep) -> NoteResponse:
+    """Notiz partiell aktualisieren (nur übergebene Felder)."""
+    note = session.get(NoteDB, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if note_update.title is not None:
+        note.title = note_update.title
+    if note_update.content is not None:
+        note.content = note_update.content
+    if note_update.category is not None:
+        note.category = note_update.category
+    if note_update.tags is not None:
+        note.tags_json = json.dumps(note_update.tags)
+    session.add(note)
+    session.commit()
+    session.refresh(note)
+    return db_to_note(note)
 
 
 @app.delete("/notes/{note_id}", status_code=204)
-def delete_note(note_id: int):
-    """Delete a note by ID. Returns 204 No Content on success."""
-    notes_db, _ = load_notes()
-
-    for i, note in enumerate(notes_db):
-        if note.id == note_id:
-            notes_db.pop(i)
-            save_notes(notes_db)
-            return
-
-    raise HTTPException(404, "Note not found")
+def delete_note(note_id: int, session: SessionDep):
+    """Notiz löschen. Gibt 204 No Content zurück."""
+    note = session.get(NoteDB, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    session.delete(note)
+    session.commit()
 
 
 # ─────────────────────────────────────────
-# Day 3 – Tags Endpoints
+# Day 3 – Tags Endpoints (aus Notizen)
 # ─────────────────────────────────────────
 
 @app.get("/tags")
-def list_tags() -> list[str]:
-    """Get all unique tags from all notes"""
-    notes_db, _ = load_notes()
-    all_tags = set()
-    for note in notes_db:
-        all_tags.update(note.tags)
+def list_tags(session: SessionDep) -> list[str]:
+    """Alle einzigartigen Tags aus allen Notizen."""
+    notes = session.exec(select(NoteDB)).all()
+    all_tags: set = set()
+    for note in notes:
+        all_tags.update(json.loads(note.tags_json))
     return sorted(list(all_tags))
 
 
 @app.get("/tags/{tag_name}/notes")
-def get_notes_by_tag(tag_name: str) -> list[Note]:
-    """Get all notes with a specific tag"""
-    notes_db, _ = load_notes()
-    return [note for note in notes_db if tag_name in note.tags]
+def get_notes_by_tag(tag_name: str, session: SessionDep) -> list[NoteResponse]:
+    """Alle Notizen mit einem bestimmten Tag."""
+    notes = session.exec(select(NoteDB)).all()
+    return [db_to_note(n) for n in notes if tag_name in json.loads(n.tags_json)]
 
 
 # ─────────────────────────────────────────
-# Day 3 Hausaufgabe Task 3 – Categories Endpoints
+# Day 3 – Categories Endpoints
 # ─────────────────────────────────────────
 
 @app.get("/categories")
-def list_categories() -> list[str]:
-    """Get all unique categories from all notes"""
-    notes_db, _ = load_notes()
-    return sorted(list(set(note.category for note in notes_db)))
+def list_categories(session: SessionDep) -> list[str]:
+    """Alle einzigartigen Kategorien."""
+    notes = session.exec(select(NoteDB)).all()
+    return sorted(list(set(note.category for note in notes)))
 
 
 @app.get("/categories/{category_name}/notes")
-def get_notes_by_category(category_name: str) -> list[Note]:
-    """Get all notes in a specific category"""
-    notes_db, _ = load_notes()
-    return [note for note in notes_db if note.category == category_name]
+def get_notes_by_category(category_name: str, session: SessionDep) -> list[NoteResponse]:
+    """Alle Notizen einer Kategorie."""
+    notes = session.exec(
+        select(NoteDB).where(NoteDB.category == category_name)
+    ).all()
+    return [db_to_note(n) for n in notes]
 
 
 # ─────────────────────────────────────────
@@ -448,26 +415,77 @@ def get_notes_by_category(category_name: str) -> list[Note]:
 # ─────────────────────────────────────────
 
 @app.get("/queryparameters")
-def query_parameters(param1: str = None, param2: int = None) -> dict:
+def query_parameters(param1: Optional[str] = None, param2: Optional[int] = None) -> dict:
     namen = ["Alice", "Bob", "Charlie"]
-
     if not param1:
         return {"namen": namen}
-
-    name_gefiltert = [name for name in namen if param1 in name]
-
     return {
         "param1": param1,
         "param2": param2,
-        "namen": name_gefiltert
+        "namen": [n for n in namen if param1 in n]
     }
 
+
 # ─────────────────────────────────────────
-# Day 4 – Course Catalog API – Datenmodelle
+# Day 5 Task 5 – Tag-Modell mit strikter Validierung
 # ─────────────────────────────────────────
 
+class TagDB(SQLModel, table=True):
+    """SQLite-Tabelle für explizit erstellte Tags mit strenger Validierung."""
+    __tablename__ = "tag"
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    name: str = SQLField(unique=True, index=True)
+
+
+class TagCreate(BaseModel):
+    """
+    Eingabe-Modell für Tags mit striktem Pattern.
+    Nur Kleinbuchstaben, Ziffern und Bindestriche erlaubt.
+    """
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    name: str = PydanticField(
+        min_length=2,
+        max_length=30,
+        pattern=r"^[a-z0-9-]+$",
+        description="Tag-Name: nur Kleinbuchstaben, Ziffern, Bindestriche"
+    )
+
+
+class TagResponse(BaseModel):
+    id: int
+    name: str
+
+
+@app.post("/tags", status_code=201)
+def create_tag(tag: TagCreate, session: SessionDep) -> TagResponse:
+    """Tag mit strikter Validierung erstellen (^[a-z0-9-]+$)."""
+    existing = session.exec(select(TagDB).where(TagDB.name == tag.name)).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Tag '{tag.name}' existiert bereits")
+    db_tag = TagDB(name=tag.name)
+    session.add(db_tag)
+    session.commit()
+    session.refresh(db_tag)
+    return TagResponse(id=db_tag.id, name=db_tag.name)
+
+
+# ─────────────────────────────────────────
+# Day 4 – Course Datenbank-Modell
+# ─────────────────────────────────────────
+
+class CourseDB(SQLModel, table=True):
+    """SQLite-Tabelle für Kurse."""
+    __tablename__ = "course"
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    code: str = SQLField(unique=True, index=True)
+    name: str
+    semester: int
+    ects: int
+    lecturer: str
+
+
 class CourseCreate(BaseModel):
-    """Model for creating courses (no ID)"""
     code: str
     name: str
     semester: int
@@ -475,8 +493,7 @@ class CourseCreate(BaseModel):
     lecturer: str
 
 
-class Course(BaseModel):
-    """Model for courses (with ID)"""
+class CourseResponse(BaseModel):
     id: int
     code: str
     name: str
@@ -484,88 +501,62 @@ class Course(BaseModel):
     ects: int
     lecturer: str
 
-# ─────────────────────────────────────────
-# Day 4 – Course Datei-Persistenz
-# ─────────────────────────────────────────
 
-COURSES_FILE = Path("courses.json")
+def db_to_course(course: CourseDB) -> CourseResponse:
+    return CourseResponse(
+        id=course.id,
+        code=course.code,
+        name=course.name,
+        semester=course.semester,
+        ects=course.ects,
+        lecturer=course.lecturer
+    )
 
-
-def load_courses():
-    """Load courses from JSON file and return courses list and next ID counter"""
-    courses_db = []
-    course_id_counter = 1
-
-    if COURSES_FILE.exists():
-        with open(COURSES_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            courses_db = [Course(**course) for course in data]
-
-            if courses_db:
-                course_id_counter = max(c.id for c in courses_db) + 1
-
-    return courses_db, course_id_counter
-
-
-def save_courses(courses_db):
-    """Save courses to JSON file after each change"""
-    with open(COURSES_FILE, 'w', encoding='utf-8') as f:
-        courses_data = [course.model_dump() for course in courses_db]
-        json.dump(courses_data, f, indent=2, ensure_ascii=False)
 
 # ─────────────────────────────────────────
 # Day 4 – Course Endpoints
 # ─────────────────────────────────────────
 
 @app.post("/courses", status_code=201)
-def create_course(course: CourseCreate) -> Course:
-    """Create a new course. Returns 409 if course code already exists."""
-    courses_db, course_id_counter = load_courses()
-
-    for existing in courses_db:
+def create_course(course: CourseCreate, session: SessionDep) -> CourseResponse:
+    """Neuen Kurs erstellen. 409 bei doppeltem Code (case-insensitive)."""
+    all_courses = session.exec(select(CourseDB)).all()
+    for existing in all_courses:
         if existing.code.upper() == course.code.upper():
             raise HTTPException(
                 status_code=409,
                 detail=f"Course with code '{course.code}' already exists"
             )
-
-    new_course = Course(
-        id=course_id_counter,
-        **course.model_dump()
-    )
-
-    courses_db.append(new_course)
-    save_courses(courses_db)
-
-    return new_course
+    db_course = CourseDB(**course.model_dump())
+    session.add(db_course)
+    session.commit()
+    session.refresh(db_course)
+    return db_to_course(db_course)
 
 
 @app.get("/courses")
-def list_courses(semester: int = None, min_ects: int = 0) -> list[Course]:
-    """List all courses with optional filters"""
-    courses_db, _ = load_courses()
-
-    filtered = courses_db
-
+def list_courses(
+    session: SessionDep,
+    semester: Optional[int] = None,
+    min_ects: int = 0
+) -> list[CourseResponse]:
+    """Kurse auflisten mit optionalen Filtern."""
+    statement = select(CourseDB)
     if semester is not None:
-        filtered = [c for c in filtered if c.semester == semester]
-
+        statement = statement.where(CourseDB.semester == semester)
     if min_ects > 0:
-        filtered = [c for c in filtered if c.ects >= min_ects]
-
-    return filtered
+        statement = statement.where(CourseDB.ects >= min_ects)
+    courses = session.exec(statement).all()
+    return [db_to_course(c) for c in courses]
 
 
 @app.get("/courses/{course_id}")
-def get_course(course_id: int) -> Course:
-    """Get a specific course by ID"""
-    courses_db, _ = load_courses()
-
-    for course in courses_db:
-        if course.id == course_id:
-            return course
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Course with ID {course_id} not found"
-    )
+def get_course(course_id: int, session: SessionDep) -> CourseResponse:
+    """Einzelnen Kurs per ID abrufen."""
+    course = session.get(CourseDB, course_id)
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Course with ID {course_id} not found"
+        )
+    return db_to_course(course)
