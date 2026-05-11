@@ -10,4 +10,5 @@ dependencies = [
     "requests>=2.33.1",
     "sqlmodel>=0.0.22",
     "faker>=37.0.0",
+    "streamlit>=1.57.0",
 ]
