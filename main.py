@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel, field_validator, model_validator, ConfigDict, Field as PydanticField
-from sqlmodel import SQLModel, Field as SQLField, Session, create_engine, select, col
+from pydantic import BaseModel, field_validator, ConfigDict, Field as PydanticField
+from sqlmodel import SQLModel, Field as SQLField, Session, create_engine, select
 from datetime import datetime, timezone
-from typing import Optional, Self, Annotated, TypeAlias
+from typing import Optional, Annotated, TypeAlias
 from collections import Counter
 import json
 
